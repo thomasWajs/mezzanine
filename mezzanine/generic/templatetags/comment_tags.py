@@ -2,8 +2,10 @@
 from collections import defaultdict
 
 from django.core.urlresolvers import reverse
+from django.template.defaultfilters import linebreaksbr, urlize
 
 from mezzanine import template
+from mezzanine.conf import settings
 from mezzanine.generic.forms import ThreadedCommentForm
 from mezzanine.generic.models import ThreadedComment
 
@@ -60,14 +62,6 @@ def comment_thread(context, parent):
     return context
 
 
-@register.simple_tag
-def gravatar_url(email_hash, size=32):
-    """
-    Return the full URL for a Gravatar given an email hash.
-    """
-    return "http://www.gravatar.com/avatar/%s?s=%s" % (email_hash, size)
-
-
 @register.inclusion_tag("admin/includes/recent_comments.html",
     takes_context=True)
 def recent_comments(context):
@@ -78,3 +72,17 @@ def recent_comments(context):
     comments = ThreadedComment.objects.all().select_related(depth=1)
     context["comments"] = comments.order_by("-id")[:latest]
     return context
+
+
+@register.filter
+def comment_filter(comment_text):
+    """
+    Passed comment text to be rendered through the function defined
+    by the ``COMMENT_FILTER`` setting. If no function is defined
+    (the default), Django's ``linebreaksbr`` and ``urlize`` filters
+    are used.
+    """
+    filter_func = settings.COMMENT_FILTER
+    if not filter_func:
+        filter_func = lambda s: linebreaksbr(urlize(s))
+    return filter_func(comment_text)

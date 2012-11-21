@@ -1,9 +1,30 @@
 .. THIS DOCUMENT IS AUTO GENERATED VIA conf.py
 
-``ACCOUNTS_ENABLED``
---------------------
+``ACCOUNTS_MIN_PASSWORD_LENGTH``
+--------------------------------
 
-If ``True``, users can create an account.
+Minimum length for passwords
+
+Default: ``6``
+
+``ACCOUNTS_PROFILE_FORM_CLASS``
+-------------------------------
+
+Dotted package path and class name of profile form to use for users signing up and updating their profile, when ``mezzanine.accounts`` is installed.
+
+Default: ``'mezzanine.accounts.forms.ProfileForm'``
+
+``ACCOUNTS_PROFILE_FORM_EXCLUDE_FIELDS``
+----------------------------------------
+
+List of fields to exclude from the profile form.
+
+Default: ``()``
+
+``ACCOUNTS_PROFILE_VIEWS_ENABLED``
+----------------------------------
+
+If ``True``, users will have their own public profile pages.
 
 Default: ``False``
 
@@ -27,6 +48,13 @@ Default: ``((u'Content', ('pages.Page', 'blog.BlogPost', 'generic.ThreadedCommen
 Unregister these models from the admin.
 
 Default: ``()``
+
+``ADMIN_THUMB_SIZE``
+--------------------
+
+Size of thumbnail previews for image fields in the admin interface.
+
+Default: ``'24x24'``
 
 ``AKISMET_API_KEY``
 -------------------
@@ -77,6 +105,13 @@ Enable featured images in blog posts
 
 Default: ``False``
 
+``CACHE_SET_DELAY_SECONDS``
+---------------------------
+
+Mezzanine's caching uses a technique know as mint caching. This is where the requested expiry for a cache entry is stored with the cache entry in cache, and the real expiry used has the ``CACHE_SET_DELAY`` added to it. Then on a cache get, the store expiry is checked, and if it has past, the cache entry is set again, and no entry is returned. This tries to ensure that cache misses never occur, and if many clients were to get a cache miss at once, only one would actually need to re-generated the cache entry.
+
+Default: ``30``
+
 ``COMMENTS_ACCOUNT_REQUIRED``
 -----------------------------
 
@@ -109,6 +144,13 @@ Default: ``''``
 -----------------------------
 
 Shortname for the `http://disqus.com <http://disqus.com>`_ comments service.
+
+Default: ``''``
+
+``COMMENTS_NOTIFICATION_EMAILS``
+--------------------------------
+
+A comma separated list of email addresses that will receive an email notification each time a new comment is posted on the site.
 
 Default: ``''``
 
@@ -234,9 +276,30 @@ Default: ``10``
 ``PAGES_MENU_SHOW_ALL``
 -----------------------
 
-If ``True``, the pages menu will show all levels of navigation, otherwise child pages are only shown when viewing the parent page.
+If ``True``, the left-hand tree template for the pages menu will show all levels of navigation, otherwise child pages are only shown when viewing the parent page.
 
 Default: ``True``
+
+``PAGES_PUBLISHED_INCLUDE_LOGIN_REQUIRED``
+------------------------------------------
+
+If ``True``, pages with ``login_required`` checked will still be listed in menus and search results, for unauthenticated users. Regardless of this setting, when an unauthenticated user accesses a page with ``login_required`` checked, they'll be redirected to the login page.
+
+Default: ``False``
+
+``PAGE_MENU_TEMPLATES``
+-----------------------
+
+A sequence of templates used by the ``page_menu`` template tag. Each item in the sequence is a three item sequence, containing a unique ID for the template, a label for the template, and the template path. These templates are then available for selection when editing which menus a page should appear in. Note that if a menu template is used that doesn't appear in this setting, all pages will appear in it.
+
+Default: ``((1, u'Top navigation bar', 'pages/menus/dropdown.html'), (2, u'Left-hand tree', 'pages/menus/tree.html'), (3, u'Footer', 'pages/menus/footer.html'))``
+
+``PAGE_MENU_TEMPLATES_DEFAULT``
+-------------------------------
+
+A sequence of IDs from the ``PAGE_MENU_TEMPLATES`` setting that defines the default menu templates selected when creating new pages. By default all menu templates are selected. Set this setting to an empty sequence to have no templates selected by default.
+
+Default: ``None``
 
 ``RATINGS_MAX``
 ---------------
@@ -252,12 +315,49 @@ Min value for a rating.
 
 Default: ``1``
 
+``RICHTEXT_ALLOWED_ATTRIBUTES``
+-------------------------------
+
+List of HTML attributes that won't be stripped from ``RichTextField`` instances.
+
+Default: ``('abbr', 'accept', 'accept-charset', 'accesskey', 'action', 'align', 'alt', 'axis', 'border', 'cellpadding', 'cellspacing', 'char', 'charoff', 'charset', 'checked', 'cite', 'class', 'clear', 'cols', 'colspan', 'color', 'compact', 'coords', 'datetime', 'dir', 'disabled', 'enctype', 'for', 'frame', 'headers', 'height', 'href', 'hreflang', 'hspace', 'id', 'ismap', 'label', 'lang', 'longdesc', 'maxlength', 'media', 'method', 'multiple', 'name', 'nohref', 'noshade', 'nowrap', 'prompt', 'readonly', 'rel', 'rev', 'rows', 'rowspan', 'rules', 'scope', 'selected', 'shape', 'size', 'span', 'src', 'start', 'style', 'summary', 'tabindex', 'target', 'title', 'type', 'usemap', 'valign', 'value', 'vspace', 'width', 'xml:lang')``
+
+``RICHTEXT_ALLOWED_STYLES``
+---------------------------
+
+List of inline CSS styles that won't be stripped from ``RichTextField`` instances.
+
+Default: ``()``
+
+``RICHTEXT_ALLOWED_TAGS``
+-------------------------
+
+List of HTML tags that won't be stripped from ``RichTextField`` instances.
+
+Default: ``('a', 'abbr', 'acronym', 'address', 'area', 'b', 'bdo', 'big', 'blockquote', 'br', 'button', 'caption', 'center', 'cite', 'code', 'col', 'colgroup', 'dd', 'del', 'dfn', 'dir', 'div', 'dl', 'dt', 'em', 'fieldset', 'font', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'input', 'ins', 'kbd', 'label', 'legend', 'li', 'map', 'menu', 'ol', 'optgroup', 'option', 'p', 'pre', 'q', 's', 'samp', 'select', 'small', 'span', 'strike', 'strong', 'sub', 'sup', 'table', 'tbody', 'td', 'textarea', 'tfoot', 'th', 'thead', 'tr', 'tt', 'u', 'ul', 'var', 'wbr')``
+
 ``RICHTEXT_FILTER``
 -------------------
 
 Dotted path to the function to call on a ``RichTextField`` value before it is rendered to the template.
 
 Default: ``None``
+
+``RICHTEXT_FILTER_LEVEL``
+-------------------------
+
+*Do not change this setting unless you know what you're doing.*
+
+When content is saved in a Rich Text (WYSIWYG) field, unsafe HTML tags and attributes are stripped from the content to protect against staff members intentionally adding code that could be used to cause problems, such as changing their account to a super-user with full access to the system.
+
+This setting allows you to change the level of filtering that occurs. Setting it to low will allow certain extra tags to be permitted, such as those required for embedding video. While these tags are not the main candidates for users adding malicious code, they are still considered dangerous and could potentially be mis-used by a particularly technical user, and so are filtered out when the filtering level is set to high.
+
+Setting the filtering level to no filtering, will disable all filtering, and allow any code to be entered by staff members, including script tags.
+
+Choices: High: ``1``, Low (allows video, iframe, Flash, etc): ``2``, No filtering: ``3``
+
+
+Default: ``1``
 
 ``RICHTEXT_WIDGET_CLASS``
 -------------------------
@@ -272,6 +372,13 @@ Default: ``'mezzanine.core.forms.TinyMceWidget'``
 Number of results shown in the search results page.
 
 Default: ``10``
+
+``SITE_PREFIX``
+---------------
+
+A URL prefix for mounting all of Mezzanine's urlpatterns under. When using this, you'll also need to manually apply it to your project's root ``urls.py`` module. The root ``urls.py`` module provided by Mezzanine's ``mezzanine-project`` command contains an example of this towards its end.
+
+Default: ``''``
 
 ``SITE_TAGLINE``
 ----------------
@@ -334,7 +441,7 @@ Default: ``4``
 
 Sequence of setting names available within templates.
 
-Default: ``('ACCOUNTS_ENABLED', 'ADMIN_MEDIA_PREFIX', 'BLOG_BITLY_USER', 'BLOG_BITLY_KEY', 'COMMENTS_DISQUS_SHORTNAME', 'COMMENTS_NUM_LATEST', 'COMMENTS_DISQUS_API_PUBLIC_KEY', 'COMMENTS_DISQUS_API_SECRET_KEY', 'DEV_SERVER', 'FORMS_USE_HTML5', 'GRAPPELLI_INSTALLED', 'GOOGLE_ANALYTICS_ID', 'JQUERY_FILENAME', 'LOGIN_URL', 'LOGOUT_URL', 'PAGES_MENU_SHOW_ALL', 'SITE_TITLE', 'SITE_TAGLINE', 'RATINGS_MAX')``
+Default: ``('ACCOUNTS_VERIFICATION_REQUIRED', 'ADMIN_MEDIA_PREFIX', 'BLOG_BITLY_USER', 'BLOG_BITLY_KEY', 'COMMENTS_DISQUS_SHORTNAME', 'COMMENTS_NUM_LATEST', 'COMMENTS_DISQUS_API_PUBLIC_KEY', 'COMMENTS_DISQUS_API_SECRET_KEY', 'DEV_SERVER', 'FORMS_USE_HTML5', 'GRAPPELLI_INSTALLED', 'GOOGLE_ANALYTICS_ID', 'JQUERY_FILENAME', 'LOGIN_URL', 'LOGOUT_URL', 'PAGES_MENU_SHOW_ALL', 'SITE_TITLE', 'SITE_TAGLINE', 'RATINGS_MAX')``
 
 ``THUMBNAILS_DIR_NAME``
 -----------------------
@@ -349,6 +456,30 @@ Default: ``'.thumbnails'``
 URL for the JavaScript file (relative to ``STATIC_URL``) that handles configuring TinyMCE when the default ``RICHTEXT_WIDGET_CLASS`` is used.
 
 Default: ``'mezzanine/js/tinymce_setup.js'``
+
+``TWITTER_DEFAULT_NUM_TWEETS``
+------------------------------
+
+Number of tweets to display in the default Twitter feed.
+
+Default: ``3``
+
+``TWITTER_DEFAULT_QUERY``
+-------------------------
+
+Twitter query to use for the default query type.
+
+Default: ``'#django'``
+
+``TWITTER_DEFAULT_QUERY_TYPE``
+------------------------------
+
+Type of query that will be used to retrieve tweets for the default Twitter feed.
+
+Choices: User: ``user``, List: ``list``, Search: ``search``
+
+
+Default: ``'search'``
 
 ``USE_SOUTH``
 -------------

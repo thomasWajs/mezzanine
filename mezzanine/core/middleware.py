@@ -1,17 +1,42 @@
 
-from django.http import HttpResponseRedirect, HttpResponsePermanentRedirect
-from django.middleware.cache import UpdateCacheMiddleware
-from django.middleware.cache import FetchFromCacheMiddleware
+from django.http import (HttpResponse, HttpResponseRedirect,
+                         HttpResponsePermanentRedirect)
+from django.utils.cache import get_max_age
+from django.template import Template, RequestContext
 
 from mezzanine.conf import settings
-from mezzanine.utils.device import device_from_request, templates_for_device
+from mezzanine.utils.cache import (cache_key_prefix, nevercache_token,
+                                   cache_get, cache_set, cache_installed)
+from mezzanine.utils.device import templates_for_device
 from mezzanine.utils.sites import templates_for_host
+
+
+_deprecated = {
+    "AdminLoginInterfaceSelector": "AdminLoginInterfaceSelectorMiddleware",
+    "DeviceAwareUpdateCacheMiddleware": "UpdateCacheMiddleware",
+    "DeviceAwareFetchFromCacheMiddleware": "FetchFromCacheMiddleware",
+}
+
+
+class _Deprecated(object):
+    def __init__(self, *args, **kwargs):
+        from warnings import warn
+        msg = "mezzanine.core.middleware.%s is deprecated." % self.old
+        if self.new:
+            msg += (" Please change the MIDDLEWARE_CLASSES setting to use "
+                    "mezzanine.core.middleware.%s" % self.new)
+        warn(msg)
+
+for old, new in _deprecated.items():
+    globals()[old] = type(old, (_Deprecated,), {"old": old, "new": new})
 
 
 class AdminLoginInterfaceSelectorMiddleware(object):
     """
     Checks for a POST from the admin login view and if authentication is
     successful and the "site" interface is selected, redirect to the site.
+
+    TODO: Just make this a view and post to it.
     """
     def process_view(self, request, view_func, view_args, view_kwargs):
         login_type = request.POST.get("mezzanine_login_interface")
@@ -26,14 +51,6 @@ class AdminLoginInterfaceSelectorMiddleware(object):
             else:
                 return response
         return None
-
-
-class AdminLoginInterfaceSelector(AdminLoginInterfaceSelectorMiddleware):
-    def __init__(self):
-        import warnings
-        old = "mezzanine.core.middleware.AdminLoginInterfaceSelector"
-        warnings.warn("%s is deprecated. Please change the MIDDLEWARE_CLASSES "
-                      "setting to use %sMiddleware" % (old, old))
 
 
 class TemplateForDeviceMiddleware(object):
@@ -58,39 +75,81 @@ class TemplateForHostMiddleware(object):
         return response
 
 
-class DeviceAwareCacheMiddleware(object):
+class UpdateCacheMiddleware(object):
     """
-    Mixin for device-aware cache middleware that provides the method for
-    prefixing the cache key with a device.
+    Response phase for Mezzanine's cache middleware. Handles caching
+    the response, and then performing the second phase of rendering,
+    for content enclosed by the ``nevercache`` tag.
     """
-    def set_key_prefix_for_device(self, request):
-        device = device_from_request(request)
-        self.key_prefix = "%s-%s" % (device,
-                                     settings.CACHE_MIDDLEWARE_KEY_PREFIX)
 
-
-class DeviceAwareUpdateCacheMiddleware(DeviceAwareCacheMiddleware,
-                                       UpdateCacheMiddleware):
-    """
-    Device-aware version of Django's ``UpdateCacheMiddleware`` - prefixes
-    the internal cache key with the device for the request for each response.
-    """
     def process_response(self, request, response):
-        self.set_key_prefix_for_device(request)
-        return super(DeviceAwareUpdateCacheMiddleware,
-                     self).process_response(request, response)
+
+        # Cache the response if all the required conditions are met.
+        # Response must be marked for updating by the
+        # ``FetchFromCacheMiddleware`` having a cache get miss, the
+        # user must not be authenticated, the HTTP status must be OK
+        # and the response mustn't include an expiry age, incicating it
+        # shouldn't be cached.
+        marked_for_update = getattr(request, "_update_cache", False)
+        anon = hasattr(request, "user") and not request.user.is_authenticated()
+        valid_status = response.status_code == 200
+        timeout = get_max_age(response)
+        if timeout is None:
+            timeout = settings.CACHE_MIDDLEWARE_SECONDS
+        if anon and valid_status and marked_for_update and timeout:
+            cache_key = cache_key_prefix(request) + request.get_full_path()
+            _cache_set = lambda r: cache_set(cache_key, r.content, timeout)
+            if callable(getattr(response, "render", None)):
+                response.add_post_render_callback(_cache_set)
+            else:
+                _cache_set(response)
+
+        # Second phase rendering for non-cached template code and
+        # content. Split on the delimiter the ``nevercache`` tag
+        # wrapped its contents in, and render only the content
+        # enclosed by it, to avoid possible template code injection.
+        parts = response.content.split(nevercache_token())
+        if response["content-type"].startswith("text") and len(parts) > 1:
+            # Restore csrf token from cookie - check the response
+            # first as it may be being set for the first time.
+            csrf_token = None
+            try:
+                csrf_token = response.cookies[settings.CSRF_COOKIE_NAME].value
+            except KeyError:
+                try:
+                    csrf_token = request.COOKIES[settings.CSRF_COOKIE_NAME]
+                except KeyError:
+                    pass
+            if csrf_token:
+                request.META["CSRF_COOKIE"] = csrf_token
+            context = RequestContext(request)
+            for i, part in enumerate(parts):
+                if i % 2:
+                    part = Template(part).render(context).encode("utf-8")
+                parts[i] = part
+            response.content = "".join(parts)
+            response["Content-Length"] = len(response.content)
+            # Required to clear out user messages.
+            request._messages.update(response)
+        return response
 
 
-class DeviceAwareFetchFromCacheMiddleware(DeviceAwareCacheMiddleware,
-                                          FetchFromCacheMiddleware):
+class FetchFromCacheMiddleware(object):
     """
-    Device-aware version of Django's ``FetchFromCacheMiddleware`` - prefixes
-    the internal cache key with the device for the request for each request.
+    Request phase for Mezzanine cache middleware. Return a response
+    from cache if found, othwerwise mark the request for updating
+    the cache in ``UpdateCacheMiddleware``.
     """
+
     def process_request(self, request):
-        self.set_key_prefix_for_device(request)
-        return super(DeviceAwareFetchFromCacheMiddleware,
-                     self).process_request(request)
+        if (cache_installed() and request.method == "GET" and
+            not request.user.is_authenticated()):
+            cache_key = cache_key_prefix(request) + request.get_full_path()
+            response = cache_get(cache_key)
+            if response is None:
+                request._update_cache = True
+            else:
+                return HttpResponse(response)
 
 
 class SSLRedirectMiddleware(object):
@@ -114,5 +173,5 @@ class SSLRedirectMiddleware(object):
             if request.path.startswith(settings.SSL_FORCE_URL_PREFIXES):
                 if not request.is_secure():
                     return HttpResponseRedirect("https://%s" % url)
-            elif request.is_secure():
+            elif request.is_secure() and settings.SSL_FORCED_PREFIXES_ONLY:
                 return HttpResponseRedirect("http://%s" % url)

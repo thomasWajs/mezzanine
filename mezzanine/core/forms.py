@@ -1,9 +1,6 @@
 
 from uuid import uuid4
 
-from django.contrib.auth import authenticate, login
-from django.contrib.auth.models import User
-from django.core.validators import validate_email, ValidationError
 from django import forms
 from django.forms.extras.widgets import SelectDateWidget
 from django.utils.safestring import mark_safe
@@ -11,6 +8,30 @@ from django.utils.translation import ugettext_lazy as _
 
 from mezzanine.conf import settings
 from mezzanine.core.models import Orderable
+
+
+class Html5Mixin(object):
+    """
+    Mixin for form classes. Adds HTML5 features to forms for client
+    side validation by the browser, like a "required" attribute and
+    "email" and "url" input types.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super(Html5Mixin, self).__init__(*args, **kwargs)
+        if hasattr(self, "fields"):
+            # Autofocus first field
+            first_field = self.fields.itervalues().next()
+            first_field.widget.attrs["autofocus"] = ""
+
+            for name, field in self.fields.items():
+                if settings.FORMS_USE_HTML5:
+                    if isinstance(field, forms.EmailField):
+                        self.fields[name].widget.input_type = "email"
+                    elif isinstance(field, forms.URLField):
+                        self.fields[name].widget.input_type = "url"
+                if field.required:
+                    self.fields[name].widget.attrs["required"] = ""
 
 
 class TinyMceWidget(forms.Textarea):
@@ -27,87 +48,6 @@ class TinyMceWidget(forms.Textarea):
     def __init__(self, *args, **kwargs):
         super(TinyMceWidget, self).__init__(*args, **kwargs)
         self.attrs["class"] = "mceEditor"
-
-
-class UserForm(forms.Form):
-    """
-    Fields for signup & login.
-    """
-    email = forms.EmailField(label=_("Email Address"))
-    password = forms.CharField(label=_("Password"),
-                               widget=forms.PasswordInput(render_value=False))
-
-    def __init__(self, request, *args, **kwargs):
-        """
-        Try and pre-populate the email field with a cookie value.
-        """
-        initial = {}
-        for value in request.COOKIES.values():
-            try:
-                validate_email(value)
-            except ValidationError:
-                pass
-            else:
-                initial["email"] = value
-                break
-        super(UserForm, self).__init__(initial=initial, *args, **kwargs)
-
-    def authenticate(self):
-        """
-        Validate email and password as well as setting the user for login.
-        """
-        self._user = authenticate(username=self.cleaned_data.get("email", ""),
-                               password=self.cleaned_data.get("password", ""))
-
-    def login(self, request):
-        """
-        Log the user in.
-        """
-        login(request, self._user)
-
-
-class SignupForm(UserForm):
-
-    def clean_email(self):
-        """
-        Ensure the email address is not already registered.
-        """
-        email = self.cleaned_data["email"]
-        try:
-            User.objects.get(username=email)
-        except User.DoesNotExist:
-            return email
-        raise forms.ValidationError(_("This email is already registered"))
-
-    def save(self):
-        """
-        Create the new user using their email address as their username.
-        """
-        user = User.objects.create_user(self.cleaned_data["email"],
-                                        self.cleaned_data["email"],
-                                        self.cleaned_data["password"])
-        settings.use_editable()
-        if settings.ACCOUNTS_VERIFICATION_REQUIRED:
-            user.is_active = False
-            user.save()
-        else:
-            self.authenticate()
-        return user
-
-
-class LoginForm(UserForm):
-
-    def clean(self):
-        """
-        Authenticate the email/password.
-        """
-        if "email" in self.cleaned_data and "password" in self.cleaned_data:
-            self.authenticate()
-            if self._user is None:
-                raise forms.ValidationError(_("Invalid email/password"))
-            elif not self._user.is_active:
-                raise forms.ValidationError(_("Your account is inactive"))
-        return self.cleaned_data
 
 
 class OrderWidget(forms.HiddenInput):
@@ -148,6 +88,15 @@ class SplitSelectDateTimeWidget(forms.SplitDateTimeWidget):
         date_widget = SelectDateWidget(attrs=attrs)
         time_widget = forms.TimeInput(attrs=attrs, format=time_format)
         forms.MultiWidget.__init__(self, (date_widget, time_widget), attrs)
+
+
+class CheckboxSelectMultiple(forms.CheckboxSelectMultiple):
+    """
+    Wraps render with a CSS class for styling.
+    """
+    def render(self, *args, **kwargs):
+        rendered = super(CheckboxSelectMultiple, self).render(*args, **kwargs)
+        return mark_safe("<span class='multicheckbox'>%s</span>" % rendered)
 
 
 def get_edit_form(obj, field_names, data=None, files=None):

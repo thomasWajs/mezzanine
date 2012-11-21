@@ -6,14 +6,14 @@ from django.core.exceptions import PermissionDenied
 from django.core.urlresolvers import NoReverseMatch
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404
-from mezzanine.pages.models import Page, RichTextPage
+
+from mezzanine.pages.models import Page, RichTextPage, Link
 from mezzanine.core.admin import DisplayableAdmin
 from mezzanine.utils.urls import admin_url
 
 
 page_fieldsets = deepcopy(DisplayableAdmin.fieldsets)
-page_fieldsets[0][1]["fields"] += (("in_navigation", "in_footer"),
-                                    "login_required",)
+page_fieldsets[0][1]["fields"] += ("in_menus", "login_required",)
 
 
 class PageAdmin(DisplayableAdmin):
@@ -43,7 +43,17 @@ class PageAdmin(DisplayableAdmin):
             # fields. Do so in reverse order to retain the order of
             # the model's fields.
             for field in reversed(self.model._meta.fields):
-                if field not in Page._meta.fields and field.name != "page_ptr":
+                check_fields = [f.name for f in Page._meta.fields]
+                check_fields.append("page_ptr")
+                try:
+                    check_fields.extend(self.exclude)
+                except (AttributeError, TypeError):
+                    pass
+                try:
+                    check_fields.extend(self.form.Meta.exclude)
+                except (AttributeError, TypeError):
+                    pass
+                if field.name not in check_fields and field.editable:
                     self.fieldsets[0][1]["fields"].insert(3, field.name)
 
     def in_menu(self):
@@ -120,8 +130,6 @@ class PageAdmin(DisplayableAdmin):
         parent = request.GET.get("parent")
         if parent is not None and not change:
             obj.parent_id = parent
-            obj._order = None
-            obj.slug = None
             obj.save()
         super(PageAdmin, self).save_model(request, obj, form, change)
 
@@ -154,5 +162,25 @@ class PageAdmin(DisplayableAdmin):
         return self._maintain_parent(request, response)
 
 
+# Drop the meta data fields, and move slug towards the stop.
+link_fieldsets = deepcopy(page_fieldsets[:1])
+link_fieldsets[0][1]["fields"] = link_fieldsets[0][1]["fields"][:-1]
+link_fieldsets[0][1]["fields"].insert(1, "slug")
+
+
+class LinkAdmin(PageAdmin):
+
+    fieldsets = link_fieldsets
+
+    def formfield_for_dbfield(self, db_field, **kwargs):
+        """
+        Make slug mandatory.
+        """
+        if db_field.name == "slug":
+            kwargs["required"] = True
+        return super(LinkAdmin, self).formfield_for_dbfield(db_field, **kwargs)
+
+
 admin.site.register(Page, PageAdmin)
 admin.site.register(RichTextPage, PageAdmin)
+admin.site.register(Link, LinkAdmin)

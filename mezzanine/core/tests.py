@@ -18,11 +18,13 @@ from django.utils.http import int_to_base36
 from django.contrib.sites.models import Site
 from PIL import Image
 
+from mezzanine.accounts import get_profile_model, get_profile_user_fieldname
 from mezzanine.blog.models import BlogPost
 from mezzanine.conf import settings, registry
 from mezzanine.conf.models import Setting
 from mezzanine.core.models import CONTENT_STATUS_DRAFT
 from mezzanine.core.models import CONTENT_STATUS_PUBLISHED
+from mezzanine.core.request import current_request
 from mezzanine.core.templatetags.mezzanine_tags import thumbnail
 from mezzanine.forms import fields
 from mezzanine.forms.models import Form
@@ -30,7 +32,7 @@ from mezzanine.galleries.models import Gallery, GALLERIES_UPLOAD_DIR
 from mezzanine.generic.forms import RatingForm
 from mezzanine.generic.models import ThreadedComment, AssignedKeyword, Keyword
 from mezzanine.generic.models import RATING_RANGE
-from mezzanine.pages.models import RichTextPage
+from mezzanine.pages.models import Page, RichTextPage
 from mezzanine.urls import PAGES_SLUG
 from mezzanine.utils.importing import import_dotted_path
 from mezzanine.utils.tests import copy_test_to_media, run_pyflakes_for_package
@@ -46,27 +48,55 @@ class Tests(TestCase):
         """
         Create an admin user.
         """
+        connection.use_debug_cursor = True
         self._username = "test"
         self._password = "test"
         args = (self._username, "example@example.com", self._password)
         self._user = User.objects.create_superuser(*args)
+
+    def account_data(self, test_value):
+        """
+        Returns a dict with test data for all the user/profile fields.
+        """
+        # User fields
+        data = {"email": test_value + "@example.com"}
+        for field in ("first_name", "last_name", "username",
+                      "password1", "password2"):
+            if field.startswith("password"):
+                value = "x" * settings.ACCOUNTS_MIN_PASSWORD_LENGTH
+            else:
+                value = test_value
+            data[field] = value
+        # Profile fields
+        Profile = get_profile_model()
+        if Profile is not None:
+            user_fieldname = get_profile_user_fieldname()
+            for field in Profile._meta.fields:
+                if field.name not in (user_fieldname, "id"):
+                    if field.choices:
+                        value = field.choices[0][0]
+                    else:
+                        value = test_value
+                    data[field.name] = value
+        return data
 
     def test_account(self):
         """
         Test account creation.
         """
         # Verification not required - test an active user is created.
-        data = {"email": "test1@example.com", "password": "test"}
+
+        data = self.account_data("test1")
         settings.ACCOUNTS_VERIFICATION_REQUIRED = False
-        response = self.client.post(reverse("account"), data, follow=True)
+        response = self.client.post(reverse("signup"), data, follow=True)
         self.assertEqual(response.status_code, 200)
         users = User.objects.filter(email=data["email"], is_active=True)
         self.assertEqual(len(users), 1)
         # Verification required - test an inactive user is created,
         settings.ACCOUNTS_VERIFICATION_REQUIRED = True
-        data["email"] = "test2@example.com"
+        data = self.account_data("test2")
         emails = len(mail.outbox)
-        response = self.client.post(reverse("account"), data, follow=True)
+        response = self.client.post(reverse("signup"), data, follow=True)
         self.assertEqual(response.status_code, 200)
         users = User.objects.filter(email=data["email"], is_active=False)
         self.assertEqual(len(users), 1)
@@ -76,7 +106,7 @@ class Tests(TestCase):
         self.assertEqual(mail.outbox[0].to[0], data["email"])
         # Test the verification link.
         new_user = users[0]
-        verification_url = reverse("verify_account", kwargs={
+        verification_url = reverse("signup_verify", kwargs={
             "uidb36": int_to_base36(new_user.id),
             "token": default_token_generator.make_token(new_user),
         })
@@ -112,6 +142,55 @@ class Tests(TestCase):
         page, created = RichTextPage.objects.get_or_create(slug="edit")
         self.assertTrue(page.overridden())
 
+    def test_page_ascendants(self):
+        """
+        Test the methods for looking up ascendants efficiently
+        behave as expected.
+        """
+        # Create related pages.
+        primary, created = RichTextPage.objects.get_or_create(title="Primary")
+        secondary, created = primary.children.get_or_create(title="Secondary")
+        tertiary, created = secondary.children.get_or_create(title="Tertiary")
+        # Force a site ID to avoid the site query when measuring queries.
+        setattr(current_request(), "site_id", settings.SITE_ID)
+
+        # Test that get_ascendants() returns the right thing.
+        page = Page.objects.get(id=tertiary.id)
+        ascendants = page.get_ascendants()
+        self.assertEqual(ascendants[0].id, secondary.id)
+        self.assertEqual(ascendants[1].id, primary.id)
+
+        # Test ascendants are returned in order for slug, using
+        # a single DB query.
+        connection.queries = []
+        pages_for_slug = Page.objects.with_ascendants_for_slug(tertiary.slug)
+        self.assertEqual(len(connection.queries), 1)
+        self.assertEqual(pages_for_slug[0].id, tertiary.id)
+        self.assertEqual(pages_for_slug[1].id, secondary.id)
+        self.assertEqual(pages_for_slug[2].id, primary.id)
+
+        # Test page.get_ascendants uses the cached attribute,
+        # without any more queries.
+        connection.queries = []
+        ascendants = pages_for_slug[0].get_ascendants()
+        self.assertEqual(len(connection.queries), 0)
+        self.assertEqual(ascendants[0].id, secondary.id)
+        self.assertEqual(ascendants[1].id, primary.id)
+
+        # Use a custom slug in the page path, and test that
+        # Page.objects.with_ascendants_for_slug fails, but
+        # correctly falls back to recursive queries.
+        secondary.slug += "custom"
+        secondary.save()
+        pages_for_slug = Page.objects.with_ascendants_for_slug(tertiary.slug)
+        self.assertEquals(len(pages_for_slug[0]._ascendants), 0)
+        connection.queries = []
+        ascendants = pages_for_slug[0].get_ascendants()
+        self.assertEqual(len(connection.queries), 2)  # 2 parent queries
+        self.assertEqual(pages_for_slug[0].id, tertiary.id)
+        self.assertEqual(ascendants[0].id, secondary.id)
+        self.assertEqual(ascendants[1].id, primary.id)
+
     def test_description(self):
         """
         Test generated description is text version of the first line
@@ -119,7 +198,7 @@ class Tests(TestCase):
         """
         description = "<p>How now brown cow</p>"
         page = RichTextPage.objects.create(title="Draft",
-                                          content=description * 3)
+                                           content=description * 3)
         self.assertEqual(page.description, strip_tags(description))
 
     def test_device_specific_template(self):
@@ -131,15 +210,14 @@ class Tests(TestCase):
             get_template("mobile/index.html")
         except TemplateDoesNotExist:
             return
-        template_name = lambda t: t.name if hasattr(t, "name") else t[0].name
         ua = settings.DEVICE_USER_AGENTS[0][1][0]
         kwargs = {"slug": "device-test"}
         url = reverse("page", kwargs=kwargs)
         kwargs["status"] = CONTENT_STATUS_PUBLISHED
         RichTextPage.objects.get_or_create(**kwargs)
-        default = self.client.get(url).template
-        mobile = self.client.get(url, HTTP_USER_AGENT=ua).template
-        self.assertNotEqual(template_name(default), template_name(mobile))
+        default = self.client.get(url)
+        mobile = self.client.get(url, HTTP_USER_AGENT=ua)
+        self.assertNotEqual(default.template_name[0], mobile.template_name[0])
 
     def test_blog_views(self):
         """
@@ -157,7 +235,8 @@ class Tests(TestCase):
         self.assertEqual(response.status_code, 200)
         # Test the blog is login protected if its page has login_required
         # set to True.
-        RichTextPage.objects.create(title="blog", slug=settings.BLOG_SLUG,
+        slug = settings.BLOG_SLUG or "/"
+        RichTextPage.objects.create(title="blog", slug=slug,
                                     login_required=True)
         response = self.client.get(reverse("blog_post_list"), follow=True)
         self.assertEqual(response.status_code, 200)
@@ -187,11 +266,9 @@ class Tests(TestCase):
         Return the number of queries used when rendering a template
         string.
         """
-        settings.DEBUG = True
         connection.queries = []
         t = Template(template)
         t.render(Context(context))
-        settings.DEBUG = False
         return len(connection.queries)
 
     def create_recursive_objects(self, model, parent_field, **kwargs):
@@ -209,7 +286,7 @@ class Tests(TestCase):
                     kwargs[parent_field] = level2
                     model.objects.create(**kwargs)
 
-    def test_comments(self):
+    def test_comment_queries(self):
         """
         Test that rendering comments executes the same number of
         queries, regardless of the number of nested replies.
@@ -225,11 +302,12 @@ class Tests(TestCase):
             "unposted_comment_form": None,
         }
         before = self.queries_used_for_template(template, **context)
+        self.assertTrue(before > 0)
         self.create_recursive_objects(ThreadedComment, "replied_to", **kwargs)
         after = self.queries_used_for_template(template, **context)
         self.assertEquals(before, after)
 
-    def test_page_menu(self):
+    def test_page_menu_queries(self):
         """
         Test that rendering a page menu executes the same number of
         queries regardless of the number of pages or levels of
@@ -238,10 +316,29 @@ class Tests(TestCase):
         template = ('{% load pages_tags %}'
                     '{% page_menu "pages/menus/tree.html" %}')
         before = self.queries_used_for_template(template)
+        self.assertTrue(before > 0)
         self.create_recursive_objects(RichTextPage, "parent", title="Page",
                                       status=CONTENT_STATUS_PUBLISHED)
         after = self.queries_used_for_template(template)
         self.assertEquals(before, after)
+
+    def test_page_menu_flags(self):
+        """
+        Test that pages only appear in the menu templates they've been
+        assigned to show in.
+        """
+        menus = []
+        pages = []
+        template = "{% load pages_tags %}"
+        for i, label, path in settings.PAGE_MENU_TEMPLATES:
+            menus.append(i)
+            pages.append(RichTextPage.objects.create(in_menus=list(menus),
+                title="Page for %s" % unicode(label),
+                status=CONTENT_STATUS_PUBLISHED))
+            template += "{%% page_menu '%s' %%}" % path
+        rendered = Template(template).render(Context({}))
+        for page in pages:
+            self.assertEquals(rendered.count(page.title), len(page.in_menus))
 
     def test_keywords(self):
         """

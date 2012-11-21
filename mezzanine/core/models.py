@@ -1,34 +1,59 @@
-from datetime import datetime
 
 from django.contrib.contenttypes.generic import GenericForeignKey
-from django.contrib.sites.models import Site
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 from django.db.models.base import ModelBase
 from django.template.defaultfilters import truncatewords_html
 from django.utils.html import strip_tags
+from django.utils.timesince import timesince
 from django.utils.translation import ugettext, ugettext_lazy as _
-from django.contrib.sites.managers import CurrentSiteManager
 
 from mezzanine.core.fields import RichTextField
-from mezzanine.core.managers import DisplayableManager
+from mezzanine.core.managers import DisplayableManager, CurrentSiteManager
 from mezzanine.generic.fields import KeywordsField
 from mezzanine.utils.html import TagCloser
 from mezzanine.utils.models import base_concrete_model
-from mezzanine.utils.urls import slugify
+from mezzanine.utils.sites import current_site_id
+from mezzanine.utils.timezone import now
+from mezzanine.utils.urls import admin_url, slugify
 
 
-class Slugged(models.Model):
+class SiteRelated(models.Model):
+    """
+    Abstract model for all things site-related. Adds a foreignkey to
+    Django's ``Site`` model, and filters by site with all querysets.
+    See ``mezzanine.utils.sites.current_site_id`` for implementation
+    details.
+    """
+
+    objects = CurrentSiteManager()
+
+    class Meta:
+        abstract = True
+
+    site = models.ForeignKey("sites.Site", editable=False)
+
+    def save(self, update_site=False, *args, **kwargs):
+        """
+        Set the site to the current site when the record is first
+        created, or the ``update_site`` argument is explicitly set
+        to ``True``.
+        """
+        if update_site or not self.id:
+            self.site_id = current_site_id()
+        super(SiteRelated, self).save(*args, **kwargs)
+
+
+class Slugged(SiteRelated):
     """
     Abstract model that handles auto-generating slugs. Each slugged
     object is also affiliated with a specific site object.
     """
 
-    title = models.CharField(_("Title"), max_length=100)
-    slug = models.CharField(_("URL"), max_length=100, blank=True, null=True)
-    site = models.ForeignKey(Site, editable=False)
-
-    objects = CurrentSiteManager()
+    title = models.CharField(_("Title"), max_length=500)
+    slug = models.CharField(_("URL"), max_length=2000, blank=True, null=True,
+            help_text=_("Leave blank to have the URL auto-generated from "
+                        "the title."))
 
     class Meta:
         abstract = True
@@ -37,40 +62,36 @@ class Slugged(models.Model):
     def __unicode__(self):
         return self.title
 
-    def save(self, update_site=False, *args, **kwargs):
+    def save(self, *args, **kwargs):
         """
-        Create a unique slug by appending an index. Set the site to
-        the current site when the record is first created, unless the
-        ``update_site`` argument is explicitly set to ``True``.
+        Create a unique slug by appending an index.
         """
         if not self.slug:
-            # For custom content types, use the ``Page`` instance for
-            # slug lookup.
-            concrete_model = base_concrete_model(Slugged, self)
             self.slug = self.get_slug()
-            i = 0
-            while True:
-                if i > 0:
-                    if i > 1:
-                        self.slug = self.slug.rsplit("-", 1)[0]
-                    self.slug = "%s-%s" % (self.slug, i)
-                qs = concrete_model.objects.all()
-                if self.id is not None:
-                    qs = qs.exclude(id=self.id)
-                try:
-                    qs.get(slug=self.slug)
-                except ObjectDoesNotExist:
-                    break
-                i += 1
-        if update_site or not self.id:
-            self.site = Site.objects.get_current()
+        # For custom content types, use the ``Page`` instance for
+        # slug lookup.
+        concrete_model = base_concrete_model(Slugged, self)
+        i = 0
+        while True:
+            if i > 0:
+                if i > 1:
+                    self.slug = self.slug.rsplit("-", 1)[0]
+                self.slug = "%s-%s" % (self.slug, i)
+            qs = concrete_model.objects.all()
+            if self.id is not None:
+                qs = qs.exclude(id=self.id)
+            try:
+                qs.get(slug=self.slug)
+            except ObjectDoesNotExist:
+                break
+            i += 1
         super(Slugged, self).save(*args, **kwargs)
 
     def get_slug(self):
         """
         Allows subclasses to implement their own slug creation logic.
         """
-        return slugify(self)
+        return slugify(self.title)
 
     def admin_link(self):
         return "<a href='%s'>%s</a>" % (self.get_absolute_url(),
@@ -84,6 +105,10 @@ class MetaData(models.Model):
     Abstract model that provides meta data for content.
     """
 
+    _meta_title = models.CharField(_("Title"), null=True, blank=True,
+        max_length=500,
+        help_text=_("Optional title to be used in the HTML title tag. "
+                    "If left blank, the main title field will be used."))
     description = models.TextField(_("Description"), blank=True)
     gen_description = models.BooleanField(_("Generate description"),
         help_text=_("If checked, the description will be automatically "
@@ -101,6 +126,13 @@ class MetaData(models.Model):
         if self.gen_description:
             self.description = strip_tags(self.description_from_content())
         super(MetaData, self).save(*args, **kwargs)
+
+    def meta_title(self):
+        """
+        Accessor for the optional ``_meta_title`` field, which returns
+        the string version of the instance if not provided.
+        """
+        return self._meta_title or unicode(self)
 
     def description_from_content(self):
         """
@@ -149,12 +181,14 @@ class Displayable(Slugged, MetaData):
     """
 
     status = models.IntegerField(_("Status"),
-        choices=CONTENT_STATUS_CHOICES, default=CONTENT_STATUS_PUBLISHED)
+        choices=CONTENT_STATUS_CHOICES, default=CONTENT_STATUS_PUBLISHED,
+        help_text=_("With Draft chosen, will only be shown for admin users "
+            "on the site."))
     publish_date = models.DateTimeField(_("Published from"),
-        help_text=_("With published checked, won't be shown until this time"),
+        help_text=_("With Published chosen, won't be shown until this time"),
         blank=True, null=True)
     expiry_date = models.DateTimeField(_("Expires on"),
-        help_text=_("With published checked, won't be shown after this time"),
+        help_text=_("With Published chosen, won't be shown after this time"),
         blank=True, null=True)
     short_url = models.URLField(blank=True, null=True)
 
@@ -171,8 +205,28 @@ class Displayable(Slugged, MetaData):
         the quick blog form in the admin dashboard.
         """
         if self.publish_date is None:
-            self.publish_date = datetime.now()
+            self.publish_date = now()
         super(Displayable, self).save(*args, **kwargs)
+
+    def get_admin_url(self):
+        return admin_url(self, "change", self.id)
+
+    def publish_date_since(self):
+        """
+        Returns the time since ``publish_date``.
+        """
+        return timesince(self.publish_date)
+    publish_date_since.short_description = _("Published from")
+
+    def get_absolute_url(self):
+        """
+        Raise an error if called on a subclass without
+        ``get_absolute_url`` defined, to ensure all search results
+        contains a URL.
+        """
+        name = self.__class__.__name__
+        raise NotImplementedError("The model %s does not have "
+                                  "get_absolute_url defined" % name)
 
 
 class RichText(models.Model):
@@ -270,6 +324,30 @@ class Orderable(models.Model):
         after = concrete_model.objects.filter(**lookup)
         after.update(_order=models.F("_order") - 1)
         super(Orderable, self).delete(*args, **kwargs)
+
+    def adjacent_by_order(self, direction):
+        """
+        Retrieves next object by order in the given direction.
+        """
+        lookup = self.with_respect_to()
+        lookup["_order"] = self._order + direction
+        concrete_model = base_concrete_model(Orderable, self)
+        try:
+            return concrete_model.objects.get(**lookup)
+        except concrete_model.DoesNotExist:
+            pass
+
+    def next_by_order(self):
+        """
+        Retrieves next object by order.
+        """
+        return self.adjacent_by_order(1)
+
+    def previous_by_order(self):
+        """
+        Retrieves previous object by order.
+        """
+        return self.adjacent_by_order(-1)
 
 
 class Ownable(models.Model):

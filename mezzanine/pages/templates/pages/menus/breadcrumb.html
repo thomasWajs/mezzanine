@@ -1,4 +1,4 @@
-{% load i18n pages_tags %}
+{% load i18n future pages_tags %}
 
 {% if on_home %}
 <li>{% trans "Home" %}</li>
@@ -7,7 +7,7 @@
 
     {% if page.is_primary and forloop.first %}
     <li>
-        <a href="{% url home %}">{% trans "Home" %}</a>
+        <a href="{% url "home" %}">{% trans "Home" %}</a>
         <span class="divider">/</span>
     </li>
     {% endif %}
@@ -17,11 +17,11 @@
     <li class="active">{{ page.title }}</li>
     {% else %}
     <li>
-        <a href="{% url page page.slug %}">{{ page.title }}</a>
+        <a href="{{ page.get_absolute_url }}">{{ page.title }}</a>
         <span class="divider">/</span>
     </li>
     {% endif %}
-    {% page_menu page %}
+    {% if page.has_children %}{% page_menu page %}{% endif %}
     {% endif %}
 
 {% endfor %}

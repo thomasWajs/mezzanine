@@ -3,7 +3,6 @@ from collections import defaultdict
 
 from django.core.exceptions import ImproperlyConfigured
 from django.core.urlresolvers import reverse, NoReverseMatch
-from django.db.models import get_models
 from django.template import TemplateSyntaxError, Variable
 from django.template.loader import get_template
 from django.utils.translation import ugettext_lazy as _
@@ -42,7 +41,6 @@ def page_menu(context, token):
             raise TemplateSyntaxError(error)
     context["menu_template_name"] = template_name
     if "menu_pages" not in context:
-        pages = defaultdict(list)
         try:
             user = context["request"].user
             slug = context["request"].path
@@ -52,8 +50,28 @@ def page_menu(context, token):
         num_children = lambda id: lambda: len(context["menu_pages"][id])
         has_children = lambda id: lambda: num_children(id)() > 0
         published = Page.objects.published(for_user=user)
-        for page in published.select_related(depth=2).order_by("_order"):
-            page.set_menu_helpers(slug)
+        if slug == admin_url(Page, "changelist"):
+            related = [m.__name__.lower() for m in Page.get_content_models()]
+            published = published.select_related(*related)
+        else:
+            published = published.select_related(depth=2)
+        # Store the current page being viewed in the context. Used
+        # for comparisons in page.set_menu_helpers.
+        if "page" not in context:
+            try:
+                context["_current_page"] = published.get(slug=slug)
+            except Page.DoesNotExist:
+                context["_current_page"] = None
+        elif slug:
+            context["_current_page"] = context["page"]
+        # Maintain a dict of page IDs -> parent IDs for fast
+        # lookup in setting page.is_current_or_ascendant in
+        # page.set_menu_helpers.
+        context["_parent_page_ids"] = {}
+        pages = defaultdict(list)
+        for page in published.order_by("_order"):
+            page.set_helpers(context)
+            context["_parent_page_ids"][page.id] = page.parent_id
             setattr(page, "num_children", num_children(page.id))
             setattr(page, "has_children", has_children(page.id))
             pages[page.parent_id].append(page)
@@ -65,22 +83,41 @@ def page_menu(context, token):
     # addition performed on it, the addition occurs each time the template
     # tag is called rather than once per level.
     context["branch_level"] = 0
+    parent_page_id = None
     if parent_page is not None:
         context["branch_level"] = getattr(parent_page, "branch_level", 0) + 1
-        parent_page = parent_page.id
-    context["page_branch"] = context["menu_pages"].get(parent_page, [])
-    context['page_branch_in_navigation'] = False
-    context['page_branch_in_footer'] = False
+        parent_page_id = parent_page.id
+
+    # Build the ``page_branch`` template variable, which is the list of
+    # pages for the current parent. Here we also assign the attributes
+    # to the page object that determines whether it belongs in the
+    # current menu template being rendered.
+    context["page_branch"] = context["menu_pages"].get(parent_page_id, [])
+    context["page_branch_in_menu"] = False
     for page in context["page_branch"]:
+        page.in_menu = page.in_menu_template(template_name)
+        page.num_children_in_menu = 0
+        if page.in_menu:
+            context["page_branch_in_menu"] = True
+        for child in context["menu_pages"].get(page.id, []):
+            if child.in_menu_template(template_name):
+                page.num_children_in_menu += 1
+        page.has_children_in_menu = page.num_children_in_menu > 0
+        page.branch_level = context["branch_level"]
+        page.parent = parent_page
+
+        # Prior to pages having the ``in_menus`` field, pages had two
+        # boolean fields ``in_navigation`` and ``in_footer`` for
+        # controlling menu inclusion. Attributes and variables
+        # simulating these are maintained here for backwards
+        # compatibility in templates, but will be removed eventually.
+        page.in_navigation = page.in_menu
+        page.in_footer = not (not page.in_menu and "footer" in template_name)
         if page.in_navigation:
-            context['page_branch_in_navigation'] = True
+            context["page_branch_in_navigation"] = True
         if page.in_footer:
-            context['page_branch_in_footer'] = True
-        if (context.get('page_branch_in_navigation') and
-            context.get('page_branch_in_footer')):
-            break
-    for i, page in enumerate(context["page_branch"]):
-        context["page_branch"][i].branch_level = context["branch_level"]
+            context["page_branch_in_footer"] = True
+
     t = get_template(template_name)
     return t.render(context)
 
@@ -92,16 +129,15 @@ def models_for_pages(*args):
     ``Page`` model.
     """
     page_models = []
-    for model in get_models():
-        if model is not Page and issubclass(model, Page):
-            try:
-                admin_url(model, "add")
-            except NoReverseMatch:
-                continue
-            else:
-                setattr(model, "name", model._meta.verbose_name)
-                setattr(model, "add_url", admin_url(model, "add"))
-                page_models.append(model)
+    for model in Page.get_content_models():
+        try:
+            admin_url(model, "add")
+        except NoReverseMatch:
+            continue
+        else:
+            setattr(model, "name", model._meta.verbose_name)
+            setattr(model, "add_url", admin_url(model, "add"))
+            page_models.append(model)
     return page_models
 
 
@@ -135,21 +171,21 @@ def set_page_permissions(context, token):
     Used within the change list for pages, to implement permission
     checks for the navigation tree.
     """
-    page = context[token.split_contents()[1]].get_content_model()
+    page = context[token.split_contents()[1]]
+    model = page.get_content_model()
     try:
-        opts = page._meta
+        opts = model._meta
     except AttributeError:
         # A missing inner Meta class usually means the Page model
         # hasn't been directly subclassed.
         error = _("An error occured with the following class. Does "
                   "it subclass Page directly?")
-        raise ImproperlyConfigured(error + " '%s'" % page.__class__.__name__)
+        raise ImproperlyConfigured(error + " '%s'" % model.__class__.__name__)
     perm_name = opts.app_label + ".%s_" + opts.object_name.lower()
     request = context["request"]
     setattr(page, "perms", {})
     for perm_type in ("add", "change", "delete"):
         perm = request.user.has_perm(perm_name % perm_type)
-        perm = perm and getattr(page, "can_%s" % perm_type)(request)
+        perm = perm and getattr(model, "can_%s" % perm_type)(request)
         page.perms[perm_type] = perm
-    context[token.split_contents()[1]] = page
     return ""

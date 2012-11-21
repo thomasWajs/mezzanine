@@ -2,12 +2,15 @@
 import os
 import sys
 
+from django.conf.global_settings import STATICFILES_FINDERS
+from django.template.loader import add_to_builtins
+
 
 def set_dynamic_settings(s):
     """
-    Called at the end of the project's settings module and is passed
+    Called at the end of the project's settings module, and is passed
     its globals dict for updating with some final tweaks for settings
-    that generally aren't specified but can be given some better
+    that generally aren't specified, but can be given some better
     defaults based on other settings that have been specified. Broken
     out into its own function so that the code need not be replicated
     in the settings modules of other project-based apps that leverage
@@ -16,21 +19,28 @@ def set_dynamic_settings(s):
 
     # Moves an existing list setting value to a different position.
     move = lambda n, k, i: s[n].insert(i, s[n].pop(s[n].index(k)))
-    # Add a value to a list setting if not in the list.
+    # Add a value to the end of a list setting if not in the list.
     append = lambda n, k: s[n].append(k) if k not in s[n] else None
+    # Add a value to the start of a list setting if not in the list.
+    prepend = lambda n, k: s[n].insert(0, k) if k not in s[n] else None
+    # Remove a value from a list setting if in the list.
+    remove = lambda n, k: s[n].remove(k) if k in s[n] else None
 
     s["TEMPLATE_DEBUG"] = s.get("TEMPLATE_DEBUG", s.get("DEBUG", False))
+    add_to_builtins("mezzanine.template.loader_tags")
     # Define some settings based on management command being run.
     management_command = sys.argv[1] if len(sys.argv) > 1 else ""
     # Some kind of testing is running via test or testserver.
     s["TESTING"] = management_command.startswith("test")
-    # Some kind of development server is running via runserver or
-    # runserver_plus
-    s["DEV_SERVER"] = management_command.startswith("runserver")
-    # Change INSTALLED_APPS and MIDDLEWARE_CLASSES to lists for
-    # easier manipulation.
+    # Some kind of development server is running via runserver,
+    # runserver_plus or harvest (lettuce)
+    s["DEV_SERVER"] = management_command.startswith("runserver") or \
+                      management_command == "harvest"
+    # Change tuple settings to lists for easier manipulation.
     s["INSTALLED_APPS"] = list(s["INSTALLED_APPS"])
     s["MIDDLEWARE_CLASSES"] = list(s["MIDDLEWARE_CLASSES"])
+    s["STATICFILES_FINDERS"] = list(s.get("STATICFILES_FINDERS",
+                                    STATICFILES_FINDERS))
 
     if s["DEV_SERVER"]:
         s["STATICFILES_DIRS"] = list(s.get("STATICFILES_DIRS", []))
@@ -42,7 +52,7 @@ def set_dynamic_settings(s):
 
     if s["TESTING"]:
         # Enable accounts when testing so the URLs exist.
-        s["ACCOUNTS_ENABLED"] = True
+        append("INSTALLED_APPS", "mezzanine.accounts")
     else:
         # Setup for optional apps.
         optional = list(s.get("OPTIONAL_APPS", []))
@@ -60,7 +70,16 @@ def set_dynamic_settings(s):
                     s["INSTALLED_APPS"].append(app)
     if "debug_toolbar" in s["INSTALLED_APPS"]:
         debug_mw = "debug_toolbar.middleware.DebugToolbarMiddleware"
-        append("MIDDLEWARE_CLASSES", debug_mw)
+        prepend("MIDDLEWARE_CLASSES", debug_mw)
+    if "compressor" in s["INSTALLED_APPS"]:
+        append("STATICFILES_FINDERS", "compressor.finders.CompressorFinder")
+
+    # Ensure the Mezzanine auth backend is enabled if
+    # mezzanine.accounts is being used.
+    if "mezzanine.accounts" in s["INSTALLED_APPS"]:
+        auth_backend = "mezzanine.core.auth_backends.MezzanineBackend"
+        s.setdefault("AUTHENTICATION_BACKENDS", [])
+        prepend("AUTHENTICATION_BACKENDS", auth_backend)
 
     # Ensure Grappelli is after Mezzanine in app order so that
     # admin templates are loaded in the correct order.
@@ -83,7 +102,7 @@ def set_dynamic_settings(s):
     if "mezzanine.blog" in s["INSTALLED_APPS"]:
         append("INSTALLED_APPS", "mezzanine.generic")
     if "mezzanine.generic" in s["INSTALLED_APPS"]:
-        s["COMMENTS_APP"] = "mezzanine.generic"
+        s.setdefault("COMMENTS_APP", "mezzanine.generic")
         append("INSTALLED_APPS", "django.contrib.comments")
 
     # Ensure mezzanine.boot is first.
@@ -95,8 +114,8 @@ def set_dynamic_settings(s):
     # Remove caching middleware if no backend defined.
     if not (s.get("CACHE_BACKEND") or s.get("CACHES")):
         s["MIDDLEWARE_CLASSES"] = [mw for mw in s["MIDDLEWARE_CLASSES"] if not
-                                   mw.endswith("UpdateCacheMiddleware") or
-                                   mw.endswith("FetchFromCacheMiddleware")]
+                                   (mw.endswith("UpdateCacheMiddleware") or
+                                    mw.endswith("FetchFromCacheMiddleware"))]
 
     # Some settings tweaks for different DB engines.
     for (key, db) in s["DATABASES"].items():
@@ -109,8 +128,10 @@ def set_dynamic_settings(s):
         elif shortname == "mysql":
             # Required MySQL collation for tests.
             s["DATABASES"][key]["TEST_COLLATION"] = "utf8_general_ci"
-        elif shortname.startswith("postgresql") and not s.get("TIME_ZONE", 1):
-            # Specifying a blank time zone to fall back to the system's
-            # time zone, which will break table creation in Postgres so
-            # remove it.
-            del s["TIME_ZONE"]
+
+    # Remaining is for Django < 1.4
+    from django import VERSION
+    if VERSION >= (1, 4):
+        return
+    s["TEMPLATE_CONTEXT_PROCESSORS"] = list(s["TEMPLATE_CONTEXT_PROCESSORS"])
+    remove("TEMPLATE_CONTEXT_PROCESSORS", "django.core.context_processors.tz")

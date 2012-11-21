@@ -2,6 +2,7 @@
 from cStringIO import StringIO
 import os
 from string import punctuation
+from urllib import unquote
 from zipfile import ZipFile
 
 from django.core.files.base import ContentFile
@@ -34,6 +35,7 @@ class Gallery(Page, RichText):
     """
 
     zip_import = models.FileField(upload_to="galleries", blank=True,
+                    verbose_name=_("Zip import"),
                     help_text=_("Upload a zip file containing images, and "
                                 "they'll be imported into this gallery."))
 
@@ -49,7 +51,11 @@ class Gallery(Page, RichText):
         super(Gallery, self).save(*args, **kwargs)
         if self.zip_import:
             zip_file = ZipFile(self.zip_import)
-            from PIL import Image
+            # import PIL in either of the two ways it can end up installed.
+            try:
+                from PIL import Image
+            except ImportError:
+                import Image
             for name in zip_file.namelist():
                 data = zip_file.read(name)
                 try:
@@ -65,9 +71,10 @@ class Gallery(Page, RichText):
                     saved_path = default_storage.save(path, ContentFile(data))
                 except UnicodeEncodeError:
                     from warnings import warn
-                    warn("Your filesystem encoding doesn't seem to support "
-                         "utf-8. You may need to set LC_CTYPE to a correct "
-                         "value via your terminal, eg: en_US.utf8")
+                    warn("A file was saved that contains unicode "
+                         "characters in its path, but somehow the current "
+                         "locale does not support utf-8. You may need to set "
+                         "'LC_ALL' to a correct value, eg: 'en_US.UTF-8'.")
                     path = os.path.join(GALLERIES_UPLOAD_DIR, self.slug,
                                         unicode(name, errors="ignore"))
                     saved_path = default_storage.save(path, ContentFile(data))
@@ -80,8 +87,10 @@ class Gallery(Page, RichText):
 class GalleryImage(Orderable):
 
     gallery = models.ForeignKey("Gallery", related_name="images")
-    file = FileField(max_length=200, upload_to="galleries")
-    description = models.CharField(max_length=1000, blank=True)
+    file = FileField(_("File"), max_length=200, upload_to="galleries",
+                                                           format="Image")
+    description = models.CharField(_("Description"), max_length=1000,
+                                                           blank=True)
 
     class Meta:
         verbose_name = _("Image")
@@ -96,7 +105,7 @@ class GalleryImage(Orderable):
         file name.
         """
         if not self.id and not self.description:
-            name = self.file.path.split("/")[-1].rsplit(".", 1)[0]
+            name = unquote(self.file.url).split("/")[-1].rsplit(".", 1)[0]
             name = name.replace("'", "")
             name = "".join([c if c not in punctuation else " " for c in name])
             # str.title() doesn't deal with unicode very well.

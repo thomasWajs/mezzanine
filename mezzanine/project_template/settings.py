@@ -3,9 +3,12 @@
 # MEZZANINE SETTINGS #
 ######################
 
-# The following settings are already defined in mezzanine.conf.defaults
-# with default values, but are common enough to be put here, commented
-# out, for convenient overriding.
+# The following settings are already defined with default values in
+# the ``defaults.py`` module within each of Mezzanine's apps, but are
+# common enough to be put here, commented out, for convenient
+# overriding. Please consult the settings documentation for a full list
+# of settings Mezzanine implements:
+# http://mezzanine.jupo.org/docs/configuration.html#default-settings
 
 # Controls the ordering and grouping of the admin menu.
 #
@@ -23,6 +26,19 @@
 #     ("blog_tags.quick_blog", "mezzanine_tags.app_list"),
 #     ("comment_tags.recent_comments",),
 #     ("mezzanine_tags.recent_actions",),
+# )
+
+# A sequence of templates used by the ``page_menu`` template tag. Each
+# item in the sequence is a three item sequence, containing a unique ID
+# for the template, a label for the template, and the template path.
+# These templates are then available for selection when editing which
+# menus a page should appear in. Note that if a menu template is used
+# that doesn't appear in this setting, all pages will appear in it.
+
+# PAGE_MENU_TEMPLATES = (
+#     (1, "Top navigation bar", "pages/menus/dropdown.html"),
+#     (2, "Left-hand tree", "pages/menus/tree.html"),
+#     (3, "Footer", "pages/menus/footer.html"),
 # )
 
 # A sequence of fields that will be injected into Mezzanine's (or any
@@ -58,12 +74,6 @@
 #
 # BLOG_USE_FEATURED_IMAGE = True
 
-# Turns on accounts for website visitors. Will add the
-# LOGIN_URL/LOGOUT_URL values to urlpatterns, and show login/logout
-# links in templates/includes/user_panel.html. Defaults to False.
-#
-# ACCOUNTS_ENABLED = True
-
 # If ``True``, users will be automatically redirected to HTTPS
 # for the URLs specified by the ``SSL_FORCE_URL_PREFIXES`` setting.
 #
@@ -82,8 +92,7 @@
 # SSL_FORCE_URL_PREFIXES = ("/admin", "/account")
 
 # If True, the south application will be automatically added to the
-# INSTALLED_APPS setting. This setting is not defined in
-# mezzanine.conf.defaults as is the case with the above settings.
+# INSTALLED_APPS setting.
 USE_SOUTH = True
 
 
@@ -106,7 +115,10 @@ MANAGERS = ADMINS
 # timezone as the operating system.
 # If running in a Windows environment this must be set to the same as your
 # system time zone.
-TIME_ZONE = ""
+TIME_ZONE = None
+
+# If you set this to True, Django will use timezone-aware datetimes.
+USE_TZ = True
 
 # Language code for this installation. All choices can be found here:
 # http://www.i18nguy.com/unicode/language-identifiers.html
@@ -140,9 +152,15 @@ TEMPLATE_LOADERS = (
     "django.template.loaders.app_directories.Loader",
 )
 
-# URLs used for login/logout when ACCOUNTS_ENABLED is set to True.
-LOGIN_URL = "/account/"
-LOGOUT_URL = "/account/logout/"
+AUTHENTICATION_BACKENDS = ("mezzanine.core.auth_backends.MezzanineBackend",)
+
+# List of finder classes that know how to find static files in
+# various locations.
+STATICFILES_FINDERS = (
+    "django.contrib.staticfiles.finders.FileSystemFinder",
+    "django.contrib.staticfiles.finders.AppDirectoriesFinder",
+#    'django.contrib.staticfiles.finders.DefaultStorageFinder',
+)
 
 
 #############
@@ -240,6 +258,7 @@ INSTALLED_APPS = (
     "mezzanine.pages",
     "mezzanine.galleries",
     "mezzanine.twitter",
+    #"mezzanine.accounts",
     #"mezzanine.mobile",
 )
 
@@ -254,26 +273,29 @@ TEMPLATE_CONTEXT_PROCESSORS = (
     "django.core.context_processors.static",
     "django.core.context_processors.media",
     "django.core.context_processors.request",
+    "django.core.context_processors.tz",
     "mezzanine.conf.context_processors.settings",
 )
 
 # List of middleware classes to use. Order is important; in the request phase,
-# this middleware classes will be applied in the order given, and in the
+# these middleware classes will be applied in the order given, and in the
 # response phase the middleware will be applied in reverse order.
 MIDDLEWARE_CLASSES = (
+    "mezzanine.core.middleware.UpdateCacheMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.redirects.middleware.RedirectFallbackMiddleware",
-    "mezzanine.core.middleware.DeviceAwareUpdateCacheMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "mezzanine.core.request.CurrentRequestMiddleware",
     "mezzanine.core.middleware.TemplateForDeviceMiddleware",
     "mezzanine.core.middleware.TemplateForHostMiddleware",
-    "mezzanine.core.middleware.DeviceAwareFetchFromCacheMiddleware",
     "mezzanine.core.middleware.AdminLoginInterfaceSelectorMiddleware",
     # Uncomment the following if using any of the SSL settings:
     # "mezzanine.core.middleware.SSLRedirectMiddleware",
+    "mezzanine.pages.middleware.PageMiddleware",
+    "mezzanine.core.middleware.FetchFromCacheMiddleware",
 )
 
 # Store these package names here as they may change in the future since
@@ -290,11 +312,35 @@ PACKAGE_NAME_GRAPPELLI = "grappelli_safe"
 OPTIONAL_APPS = (
     "debug_toolbar",
     "django_extensions",
+    "compressor",
     PACKAGE_NAME_FILEBROWSER,
     PACKAGE_NAME_GRAPPELLI,
 )
 
 DEBUG_TOOLBAR_CONFIG = {"INTERCEPT_REDIRECTS": False}
+
+###################
+# DEPLOY SETTINGS #
+###################
+
+# These settings are used by the default fabfile.py provided.
+# Check fabfile.py for defaults.
+
+# FABRIC = {
+#     "SSH_USER": "", # SSH username
+#     "SSH_PASS":  "", # SSH password (consider key-based authentication)
+#     "SSH_KEY_PATH":  "", # Local path to SSH key file, for key-based auth
+#     "HOSTS": [], # List of hosts to deploy to
+#     "VIRTUALENV_HOME":  "", # Absolute remote path for virtualenvs
+#     "PROJECT_NAME": "", # Unique identifier for project
+#     "REQUIREMENTS_PATH": "", # Path to pip requirements, relative to project
+#     "GUNICORN_PORT": 8000, # Port gunicorn will listen on
+#     "LOCALE": "en_US.UTF-8", # Should end with ".UTF-8"
+#     "LIVE_HOSTNAME": "www.example.com", # Host for public site.
+#     "REPO_URL": "", # Git or Mercurial remote repo URL for the project
+#     "DB_PASS": "", # Live database password
+#     "ADMIN_PASS": "", # Live admin user password
+# }
 
 
 ##################
@@ -316,6 +362,13 @@ except ImportError:
 
 # set_dynamic_settings() will rewrite globals based on what has been
 # defined so far, in order to provide some better defaults where
-# applicable.
-from mezzanine.utils.conf import set_dynamic_settings
-set_dynamic_settings(globals())
+# applicable. We also allow this settings module to be imported
+# without Mezzanine installed, as the case may be when using the
+# fabfile, where setting the dynamic settings below isn't strictly
+# required.
+try:
+    from mezzanine.utils.conf import set_dynamic_settings
+except ImportError:
+    pass
+else:
+    set_dynamic_settings(globals())
