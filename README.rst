@@ -155,6 +155,20 @@ Please note the following guidelines for contributing:
   * If you are adding new functionality, you must include basic tests
     and documentation.
 
+If you want to do development with mezzanine, here's a quick way to set
+up a development environment and run the unit tests, using
+`virtualenvwrapper`_ to set up a virtualenv::
+
+    $ mkvirtualenv mezzanine
+    $ workon mezzanine
+    $ pip install Django pep8 pyflakes
+    $ git clone https://github.com/stephenmcd/mezzanine/
+    $ cd mezzanine
+    $ python setup.py develop
+    $ cp mezzanine/project_template/local_settings.py.template mezzanine/project_template/local_settings.py
+    $ ./mezzanine/project_template/manage.py test
+
+
 Language Translations
 =====================
 
@@ -196,8 +210,9 @@ You can also add modules to the `Mezzanine Grid on djangopackages.com`_.
     Google Calendar/Maps.
   * `mezzanine-polls`_ - Polls application for Mezzanine.
   * `mezzanine-pagedown`_ - Adds the `Pagedown`_ WYSIWYG editor to
-     Mezzanine.
+    Mezzanine.
   * `mezzanine-careers`_ - Job posting application for Mezzanine.
+  * `mezzanine-recipes`_ - Recipes plugin with built-in REST API.
 
 Donating
 ========
@@ -320,6 +335,7 @@ Sites Using Mezzanine
   * `SiteComb <http://www.sitecomb.com>`_
   * `Dashing Collective <http://dashing.tv/>`_
   * `Puraforce Remedies <http://puraforceremedies.com/>`_
+  * `Google's VetNet <http://www.vetnethq.com/>`_
 
 Quotes
 ======
@@ -407,6 +423,7 @@ Quotes
 .. _`Tabblo`: http://www.tabblo.com/
 .. _`The Linux Journal`: http://www.linuxjournal.com
 .. _`Work For Pie`: http://workforpie.com/
+.. _`virtualenvwrapper`: http://www.doughellmann.com/projects/virtualenvwrapper
 
 
 .. THIRD PARTY LIBS
@@ -430,6 +447,7 @@ Quotes
 .. _`mezzanine-pagedown`: https://bitbucket.org/akhayyat/mezzanine-pagedown
 .. _`PageDown`: https://code.google.com/p/pagedown/
 .. _`mezzanine-careers`: https://github.com/mogga/mezzanine-careers
+.. _`mezzanine-recipes`: https://github.com/tjetzinger/mezzanine-recipes
 
 
 .. PEOPLE WITH QUOTES
