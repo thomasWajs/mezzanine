@@ -1,5 +1,6 @@
 
 from datetime import datetime, timedelta
+
 from urllib import urlencode
 from urllib2 import Request, urlopen
 
@@ -13,6 +14,7 @@ from django.utils.translation import ugettext as _
 import mezzanine
 from mezzanine.conf import settings
 from mezzanine.utils.sites import has_site_permission
+from mezzanine.utils.importing import import_dotted_path
 
 
 def is_editable(obj, request):
@@ -31,11 +33,12 @@ def is_editable(obj, request):
                 request.user.has_perm(perm))
 
 
-def is_spam(request, form, url):
+def is_spam_akismet(request, form, url):
     """
     Identifies form data as being spam, using the http://akismet.com
     service. The Akismet API key should be specified in the
-    ``AKISMET_API_KEY`` setting.
+    ``AKISMET_API_KEY`` setting. This function is the default spam
+    handler defined in the ``SPAM_FILTERS`` setting.
 
     The name, email, url and comment fields are all guessed from the
     form fields:
@@ -88,6 +91,18 @@ def is_spam(request, form, url):
     except Exception:
         return False
     return response == "true"
+
+
+def is_spam(request, form, url):
+    """
+    Main entry point for spam handling - called from the comment view and
+    page processor for ``mezzanine.forms``, to check if posted content is
+    spam. Spam filters are configured via the ``SPAM_FILTERS`` setting.
+    """
+    for spam_filter_path in settings.SPAM_FILTERS:
+        spam_filter = import_dotted_path(spam_filter_path)
+        if spam_filter(request, form, url):
+            return True
 
 
 def paginate(objects, page_num, per_page, max_paging_links):

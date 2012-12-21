@@ -213,6 +213,10 @@ You can also add modules to the `Mezzanine Grid on djangopackages.com`_.
     Mezzanine.
   * `mezzanine-careers`_ - Job posting application for Mezzanine.
   * `mezzanine-recipes`_ - Recipes plugin with built-in REST API.
+  * `mezzanine-slides`_ - Responsive banner slides app for Mezzanine.
+  * `mezzyblocks`_ - Another app for adding blocks/modules to Mezzanine.
+  * `mezzanine-flexipage`_ - Allows designers to manage content areas
+    in templates.
 
 Donating
 ========
@@ -336,6 +340,21 @@ Sites Using Mezzanine
   * `Dashing Collective <http://dashing.tv/>`_
   * `Puraforce Remedies <http://puraforceremedies.com/>`_
   * `Google's VetNet <http://www.vetnethq.com/>`_
+  * `1800RESPECT <http://www.1800respect.org.au/>`_
+  * `Evenhouse Consulting <http://evenhouseconsulting.com/>`_
+  * `Humboldt Community Christian School <http://humboldtccs.org>`_
+  * `Atlanta's Living Legacy <http://gradyhistory.com>`_
+  * `Shipgistix <http://shipgistix.com>`_
+  * `Yuberactive <http://www.yuberactive.asia>`_
+  * `Medical Myth Busters <http://pogromcymitowmedycznych.pl>`_
+  * `4player Network <http://4playernetwork.com/>`_
+  * `Top500 Supercomputers <http://top500.org>`_
+  * `Die Betroffenen <http://www.zeichnemit.de>`_
+  * `uvena.de <http://uvena.de>`_
+  * `ezless.com <http://ezless.com>`_
+  * `Dominican Python <http://python.do>`_
+  * `Stackful.io <http://stackful.io/>`_
+  * `Adrenaline <http://www.adrln.com/>`_
 
 Quotes
 ======
@@ -448,6 +467,9 @@ Quotes
 .. _`PageDown`: https://code.google.com/p/pagedown/
 .. _`mezzanine-careers`: https://github.com/mogga/mezzanine-careers
 .. _`mezzanine-recipes`: https://github.com/tjetzinger/mezzanine-recipes
+.. _`mezzanine-slides`: https://github.com/overshard/mezzanine-slides
+.. _`mezzyblocks`: https://github.com/jardaroh/mezzyblocks
+.. _`mezzanine-flexipage`: https://github.com/mrmagooey/mezzanine-flexipage
 
 
 .. PEOPLE WITH QUOTES
