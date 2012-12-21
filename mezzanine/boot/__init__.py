@@ -15,19 +15,13 @@ from django.conf import settings
 from django.contrib import admin
 from django.core.exceptions import ImproperlyConfigured
 from django.db.models.signals import class_prepared
+from django.utils.importlib import import_module
 
 from mezzanine.boot.lazy_admin import LazyAdminSite
 from mezzanine.utils.importing import import_dotted_path
 
-
-# Convert ``EXTRA_MODEL_FIELDS`` into a more usable structure, a
-# dictionary mapping module.model paths to dicts of field names mapped
-# to field instances to inject, with some sanity checking to ensure
-# the field is importable and the arguments given for it are valid.
-fields = defaultdict(dict)
-for entry in getattr(settings, "EXTRA_MODEL_FIELDS", []):
-    model_path, field_name = entry[0].rsplit(".", 1)
-    field_path, field_args, field_kwargs = entry[1:]
+def register_extra_field(model, field_path, field_args, field_kwargs):
+    model_path, field_name = model.rsplit(".", 1)
     if "." not in field_path:
         field_path = "django.db.models.%s" % field_path
     try:
@@ -35,16 +29,30 @@ for entry in getattr(settings, "EXTRA_MODEL_FIELDS", []):
     except ImportError:
         raise ImproperlyConfigured("The EXTRA_MODEL_FIELDS setting contains "
                                    "the field '%s' which could not be "
-                                   "imported." % entry[1])
+                                   "imported." % field_path)
     try:
         field = field_class(*field_args, **field_kwargs)
     except TypeError, e:
         raise ImproperlyConfigured("The EXTRA_MODEL_FIELDS setting contains "
                                    "arguments for the field '%s' which could "
-                                   "not be applied: %s" % (entry[1], e))
+                                   "not be applied: %s" % (field_path, e))
     fields[model_path][field_name] = field
 
+# Convert ``EXTRA_MODEL_FIELDS`` into a more usable structure, a
+# dictionary mapping module.model paths to dicts of field names mapped
+# to field instances to inject, with some sanity checking to ensure
+# the field is importable and the arguments given for it are valid.
+fields = defaultdict(dict)
+for entry in getattr(settings, "EXTRA_MODEL_FIELDS", []):
+    register_extra_field(*entry)
 
+for app_path in getattr(settings, "INSTALLED_APPS", []):
+    try:
+        field_class = import_module(app_path+'.extra_fields')
+    except ImportError:
+        #No extra fields defined, not a big deal
+        pass
+    
 def add_extra_model_fields(sender, **kwargs):
     """
     Injects custom fields onto the given sender model as defined
